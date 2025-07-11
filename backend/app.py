@@ -65,6 +65,14 @@ def upload_file():
         # Save student schedule to database
         add_student_schedule(email, schedule)
         
+        # Send welcome email with schedule and attachments
+        send_weekly_email(email, schedule, {
+            'email': email,
+            'wakeup': wakeup,
+            'sleep': sleep,
+            'study_style': study_style
+        })
+        
         # Clean up uploaded file
         os.remove(filepath)
         
