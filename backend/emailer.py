@@ -13,26 +13,65 @@ SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
 EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS', 'your_email@example.com')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD', 'your_app_password')
 
-def send_weekly_email(to_email, schedule_data):
-    """Send a weekly schedule summary email to the student"""
+def send_weekly_email(to_email, schedule_data, student_preferences=None):
+    """Send a weekly schedule summary email with calendar and document attachments"""
     try:
+        from email.mime.base import MIMEBase
+        from email import encoders
+        import tempfile
+        import os
+        
         # Generate email content
-        subject = '📅 Your Weekly Study Schedule Summary'
-        html_content = generate_weekly_email_html(schedule_data)
+        subject = '📅 Your StudyFlow Schedule & Calendar Files'
+        html_content = generate_weekly_email_html(schedule_data, student_preferences)
         text_content = generate_weekly_email_text(schedule_data)
         
-        # Create message
-        msg = MIMEMultipart('alternative')
+        # Create message with attachments
+        msg = MIMEMultipart('mixed')
         msg['Subject'] = subject
         msg['From'] = EMAIL_ADDRESS
         msg['To'] = to_email
+        
+        # Create alternative container for text/html
+        msg_alternative = MIMEMultipart('alternative')
         
         # Add both plain text and HTML versions
         part1 = MIMEText(text_content, 'plain')
         part2 = MIMEText(html_content, 'html')
         
-        msg.attach(part1)
-        msg.attach(part2)
+        msg_alternative.attach(part1)
+        msg_alternative.attach(part2)
+        msg.attach(msg_alternative)
+        
+        # Generate and attach calendar file
+        try:
+            ics_content = generate_calendar_ics_file(schedule_data, to_email)
+            
+            calendar_attachment = MIMEBase('text', 'calendar')
+            calendar_attachment.set_payload(ics_content.encode('utf-8'))
+            encoders.encode_base64(calendar_attachment)
+            calendar_attachment.add_header(
+                'Content-Disposition',
+                'attachment; filename="StudyFlow_Schedule.ics"'
+            )
+            msg.attach(calendar_attachment)
+        except Exception as e:
+            print(f"Warning: Could not generate calendar file: {e}")
+        
+        # Generate and attach summary document
+        try:
+            doc_content = generate_schedule_summary_doc(schedule_data, student_preferences or {})
+            
+            doc_attachment = MIMEBase('text', 'plain')
+            doc_attachment.set_payload(doc_content.encode('utf-8'))
+            encoders.encode_base64(doc_attachment)
+            doc_attachment.add_header(
+                'Content-Disposition',
+                'attachment; filename="StudyFlow_Summary.txt"'
+            )
+            msg.attach(doc_attachment)
+        except Exception as e:
+            print(f"Warning: Could not generate summary document: {e}")
         
         # Send email
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
@@ -144,7 +183,110 @@ def send_deadline_reminder(to_email, deadline_info):
         print(f"Error sending deadline reminder: {e}")
         return False
 
-def generate_weekly_email_html(schedule_data):
+def generate_calendar_ics_file(schedule_data, student_email):
+    """Generate an ICS calendar file that students can import to Google/Outlook"""
+    from datetime import datetime
+    import uuid
+    
+    ics_content = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//StudyFlow//StudyFlow App//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+"""
+    
+    for date_str, activities in schedule_data.items():
+        for activity in activities:
+            if activity.get('type') in ['study', 'deadline', 'exam']:
+                # Create unique event ID
+                event_id = str(uuid.uuid4())
+                
+                # Parse date and time
+                event_date = datetime.strptime(date_str, '%Y-%m-%d')
+                activity_time = activity.get('time', '09:00')
+                
+                try:
+                    hour, minute = map(int, activity_time.split(':'))
+                    start_datetime = event_date.replace(hour=hour, minute=minute)
+                    
+                    # Default duration based on activity type
+                    duration_minutes = activity.get('duration', 60)
+                    end_datetime = start_datetime.replace(minute=start_datetime.minute + duration_minutes)
+                    
+                    # Format for ICS
+                    start_str = start_datetime.strftime('%Y%m%dT%H%M%S')
+                    end_str = end_datetime.strftime('%Y%m%dT%H%M%S')
+                    
+                    ics_content += f"""BEGIN:VEVENT
+UID:{event_id}@studyflow.app
+DTSTART:{start_str}
+DTEND:{end_str}
+SUMMARY:{activity.get('activity', 'Study Session')}
+DESCRIPTION:{activity.get('description', 'Generated by StudyFlow')}
+CATEGORIES:EDUCATION
+END:VEVENT
+"""
+                except:
+                    continue  # Skip malformed times
+    
+    ics_content += "END:VCALENDAR"
+    return ics_content
+
+def generate_schedule_summary_doc(schedule_data, student_preferences):
+    """Generate a Word document summary of the student's input and schedule"""
+    summary = f"""
+STUDYFLOW - YOUR PERSONALIZED STUDY PLAN SUMMARY
+===============================================
+
+STUDENT PREFERENCES:
+- Email: {student_preferences.get('email', 'Not provided')}
+- Wake Up Time: {student_preferences.get('wakeup', 8)}:00 AM
+- Sleep Time: {student_preferences.get('sleep', 23)}:00 PM
+- Study Style: {student_preferences.get('study_style', 'Not specified')}
+
+SCHEDULE OVERVIEW:
+=================
+
+"""
+    
+    # Add daily breakdown
+    for date_str, activities in sorted(schedule_data.items())[:14]:  # First 2 weeks
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        day_name = date_obj.strftime('%A, %B %d, %Y')
+        
+        summary += f"\n{day_name}:\n"
+        summary += "-" * 40 + "\n"
+        
+        for activity in activities:
+            summary += f"{activity.get('time', '')} - {activity.get('activity', '')}\n"
+            if activity.get('description'):
+                summary += f"    Notes: {activity.get('description')}\n"
+        summary += "\n"
+    
+    summary += """
+STUDY TIPS FOR SUCCESS:
+======================
+- Take regular 10-15 minute breaks between study sessions
+- Stay hydrated and maintain good nutrition
+- Get adequate sleep (7-9 hours per night)
+- Use active learning techniques (flashcards, practice problems)
+- Create a dedicated study space free from distractions
+- Don't hesitate to ask professors or classmates for help
+
+USING THIS DOCUMENT:
+===================
+- Save this document for your records
+- If you need to recreate your schedule, you have all your preferences here
+- Share relevant parts with study partners or tutors
+- Use the calendar file (if attached) to import into Google Calendar or Outlook
+
+Generated by StudyFlow - Your Smart College Planner
+Visit us again anytime to create updated schedules!
+"""
+    
+    return summary
+
+def generate_weekly_email_html(schedule_data, student_preferences=None):
     """Generate HTML content for weekly schedule email"""
     today = datetime.today()
     week_start = today - timedelta(days=today.weekday())
