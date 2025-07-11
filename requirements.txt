@@ -1,2 +1,28 @@
-Flask
-textract
+Flask==2.3.3
+Flask-CORS==4.0.0
+textract==1.6.5
+PyPDF2==3.0.1
+python-docx==0.8.11
+sqlite3
+smtplib
+email-validator==2.0.0
+python-dateutil==2.8.2
+schedule==1.2.0
+pathlib2==2.3.7
+
+# Optional: For more advanced text processing
+# nltk==3.8.1
+# spacy==3.6.1
+
+# For production deployment
+gunicorn==21.2.0
+python-dotenv==1.0.0
+
+# For enhanced PDF processing
+pdfplumber==0.9.0
+
+# For better date parsing
+dateparser==1.1.8
+
+# For file type detection
+python-magic==0.4.27
